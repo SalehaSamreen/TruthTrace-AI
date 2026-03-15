@@ -1,5 +1,4 @@
 import sharp from 'sharp';
-import { Canvas } from 'canvas';
 
 interface ELAResult {
   heatmapBuffer: Buffer;
@@ -46,11 +45,8 @@ export async function analyzeELA(imageBuffer: Buffer): Promise<ELAResult> {
   // Multiply by 15 to amplify compression artifacts
   const scaleFactor = Math.max(1, Math.min(255 / (maxError + 1) * 2, 255));
 
-  // Create heatmap visualization
-  const canvas = new Canvas(width, height);
-  const ctx = canvas.getContext('2d');
-  const imageData = ctx.createImageData(width, height);
-  const data = imageData.data;
+  // Create heatmap visualization using raw pixel buffer
+  const pixelBuffer = Buffer.alloc(width * height * 4);
 
   for (let i = 0; i < errorMap.length; i++) {
     const error = errorMap[i];
@@ -59,14 +55,15 @@ export async function analyzeELA(imageBuffer: Buffer): Promise<ELAResult> {
     const idx = i * 4;
 
     // Red heatmap: black (0,0,0) = no error, bright red = high error
-    data[idx] = amplified;     // Red channel
-    data[idx + 1] = Math.max(0, amplified - 200); // Green: only very high
-    data[idx + 2] = 0;         // Blue: none (pure red scale)
-    data[idx + 3] = 255;       // Alpha: fully opaque
+    pixelBuffer[idx] = amplified;     // Red channel
+    pixelBuffer[idx + 1] = Math.max(0, amplified - 200); // Green: only very high
+    pixelBuffer[idx + 2] = 0;         // Blue: none (pure red scale)
+    pixelBuffer[idx + 3] = 255;       // Alpha: fully opaque
   }
 
-  ctx.putImageData(imageData, 0, 0);
-  const heatmapBuffer = canvas.toBuffer('image/png');
+  const heatmapBuffer = await sharp(pixelBuffer, {
+    raw: { width, height, channels: 4 }
+  }).png().toBuffer();
 
   // Find suspicious region (highest anomaly area)
   const blockSize = Math.min(width, height) / 8;
@@ -142,11 +139,8 @@ export async function analyzeNoise(imageBuffer: Buffer): Promise<{ noiseMapBuffe
 
   const avgNoise = totalNoise / blockCount;
 
-  // Create noise map visualization
-  const canvas = new Canvas(width, height);
-  const ctx = canvas.getContext('2d');
-  const imageData = ctx.createImageData(width, height);
-  const data = imageData.data;
+  // Create noise map visualization using raw pixel buffer
+  const pixelBuffer = Buffer.alloc(width * height * 4);
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -165,15 +159,16 @@ export async function analyzeNoise(imageBuffer: Buffer): Promise<{ noiseMapBuffe
       }
       localVar /= count;
       const grayScale = Math.min(255, (localVar / 255) * 200);
-      data[idx] = grayScale;
-      data[idx + 1] = grayScale;
-      data[idx + 2] = grayScale;
-      data[idx + 3] = 255;
+      pixelBuffer[idx] = grayScale;
+      pixelBuffer[idx + 1] = grayScale;
+      pixelBuffer[idx + 2] = grayScale;
+      pixelBuffer[idx + 3] = 255;
     }
   }
 
-  ctx.putImageData(imageData, 0, 0);
-  const noiseMapBuffer = canvas.toBuffer('image/png');
+  const noiseMapBuffer = await sharp(pixelBuffer, {
+    raw: { width, height, channels: 4 }
+  }).png().toBuffer();
 
   return {
     noiseMapBuffer,
@@ -199,34 +194,40 @@ export async function analyzeFFT(imageBuffer: Buffer): Promise<{ fftBuffer: Buff
   const ratio = highFreqEnergy / (lowFreqEnergy + 1);
   const hasAIPattern = ratio > 0.95 && ratio < 1.1; // Very uniform patterns suggest AI
 
-  // Create FFT spectrum visualization
-  const canvas = new Canvas(256, 256);
-  const ctx = canvas.getContext('2d');
+  // Create FFT spectrum visualization using gradient effect with pixel buffer
+  const pixelBuffer = Buffer.alloc(256 * 256 * 4);
 
-  // Create gradient for frequency visualization
-  const gradient = ctx.createLinearGradient(0, 0, 256, 256);
-  gradient.addColorStop(0, '#0ea5e9');
-  gradient.addColorStop(0.5, '#8b5cf6');
-  gradient.addColorStop(1, '#ef4444');
+  // Fill with gradient - cyan to purple to red
+  for (let y = 0; y < 256; y++) {
+    for (let x = 0; x < 256; x++) {
+      const idx = (y * 256 + x) * 4;
+      const progress = (x + y) / 512; // 0-1 gradient
 
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 256, 256);
+      let r = 0, g = 0, b = 0;
+      if (progress < 0.5) {
+        // Cyan to purple
+        const t = progress * 2;
+        r = Math.floor(14 * (1 - t) + 139 * t);
+        g = Math.floor(165 * (1 - t) + 92 * t);
+        b = Math.floor(233 * (1 - t) + 246 * t);
+      } else {
+        // Purple to red
+        const t = (progress - 0.5) * 2;
+        r = Math.floor(139 * (1 - t) + 239 * t);
+        g = Math.floor(92 * (1 - t) + 68 * t);
+        b = Math.floor(246 * (1 - t) + 68 * t);
+      }
 
-  // Draw frequency distribution
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-  for (let i = 0; i < 20; i++) {
-    const x = Math.random() * 256;
-    const y = Math.random() * 256;
-    const size = hasAIPattern ? 2 : Math.random() * 8;
-    ctx.fillRect(x, y, size, size);
+      pixelBuffer[idx] = r;
+      pixelBuffer[idx + 1] = g;
+      pixelBuffer[idx + 2] = b;
+      pixelBuffer[idx + 3] = 255;
+    }
   }
 
-  ctx.font = 'bold 14px sans-serif';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-  ctx.textAlign = 'center';
-  ctx.fillText('Frequency Spectrum', 128, 230);
-
-  const fftBuffer = canvas.toBuffer('image/png');
+  const fftBuffer = await sharp(pixelBuffer, {
+    raw: { width: 256, height: 256, channels: 4 }
+  }).png().toBuffer();
 
   return {
     fftBuffer,

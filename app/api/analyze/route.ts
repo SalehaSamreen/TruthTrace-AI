@@ -3,7 +3,6 @@ import { analyzeELA, analyzeNoise, analyzeFFT } from '@/lib/analysis/imageAnalys
 import { analyzeMetadata, getCompressionAnomaly } from '@/lib/analysis/metadata';
 import { calculateScore } from '@/lib/analysis/scoring';
 import sharp from 'sharp';
-import { Canvas } from 'canvas';
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB
 
@@ -114,54 +113,20 @@ async function generateSuspiciousRegion(
   imageBuffer: Buffer,
   box: { x: number; y: number; width: number; height: number }
 ): Promise<Buffer> {
+  // For Vercel compatibility, return the original image
+  // The UI will display the suspicious box metadata for user reference
+  // Sharp doesn't provide easy canvas-like drawing, so we avoid complex annotations
+
   const metadata = await sharp(imageBuffer).metadata();
   const width = metadata.width || 800;
   const height = metadata.height || 600;
 
-  // Get the original image as PNG for canvas
-  const pngBuffer = await sharp(imageBuffer).png().toBuffer();
+  // Create a simple overlay by converting image to PNG and returning it
+  // (The suspicious box coordinates are included in the main JSON response for display)
+  const processed = await sharp(imageBuffer)
+    .resize(width, height, { fit: 'inside', withoutEnlargement: true })
+    .png()
+    .toBuffer();
 
-  const canvas = new Canvas(width, height);
-  const ctx = canvas.getContext('2d');
-
-  // Load image from buffer into canvas
-  const { Image } = require('canvas');
-  const img = new Image();
-
-  return new Promise((resolve, reject) => {
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0);
-
-      // Draw red bounding box
-      const boxX = Math.max(0, Math.floor(box.x));
-      const boxY = Math.max(0, Math.floor(box.y));
-      const boxW = Math.min(box.width, width - boxX);
-      const boxH = Math.min(box.height, height - boxY);
-
-      ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(boxX, boxY, boxW, boxH);
-
-      // Add corner accents
-      const cornerLen = 20;
-      ctx.fillStyle = '#ef4444';
-      ctx.fillRect(boxX, boxY, cornerLen, 3);
-      ctx.fillRect(boxX, boxY, 3, cornerLen);
-      ctx.fillRect(boxX + boxW - cornerLen, boxY, cornerLen, 3);
-      ctx.fillRect(boxX + boxW - 3, boxY, 3, cornerLen);
-      ctx.fillRect(boxX, boxY + boxH - 3, cornerLen, 3);
-      ctx.fillRect(boxX, boxY + boxH - cornerLen, 3, cornerLen);
-      ctx.fillRect(boxX + boxW - cornerLen, boxY + boxH - 3, cornerLen, 3);
-      ctx.fillRect(boxX + boxW - 3, boxY + boxH - cornerLen, 3, cornerLen);
-
-      const result = canvas.toBuffer('image/png');
-      resolve(result);
-    };
-
-    img.onerror = () => {
-      reject(new Error('Failed to load image'));
-    };
-
-    img.src = pngBuffer;
-  });
+  return processed;
 }
