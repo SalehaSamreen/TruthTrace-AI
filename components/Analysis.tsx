@@ -18,10 +18,18 @@ export default function Analysis({ result, onReset }: AnalysisProps) {
   const handleDownloadPDF = async () => {
     setIsGeneratingReport(true);
     try {
+      // Create lean payload with only text data (no images)
+      const textOnlyPayload = {
+        score: result.score,
+        verdict: result.verdict,
+        explanation: result.explanation,
+        signals: result.signals,
+      };
+
       const response = await fetch('/api/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(result),
+        body: JSON.stringify(textOnlyPayload),
       });
 
       if (!response.ok) {
