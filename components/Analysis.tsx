@@ -25,21 +25,31 @@ export default function Analysis({ result, onReset }: AnalysisProps) {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        const contentType = response.headers.get('content-type');
+        let errorMessage = `HTTP ${response.status}`;
+
+        if (contentType?.includes('application/json')) {
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.details || errorData.error || errorMessage;
+          } catch {
+            // Fall back to status message if JSON parsing fails
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       // Check for correct content type
       const contentType = response.headers.get('content-type');
       if (!contentType || !contentType.includes('application/pdf')) {
-        throw new Error('Invalid response: expected PDF');
+        throw new Error('Invalid response: expected PDF, got ' + (contentType || 'unknown'));
       }
 
       const blob = await response.blob();
 
-      // Verify blob is valid PDF (starts with %PDF)
+      // Verify blob is valid PDF
       if (blob.size === 0) {
-        throw new Error('Empty PDF response');
+        throw new Error('Empty PDF response from server');
       }
 
       const url = window.URL.createObjectURL(blob);
@@ -52,7 +62,8 @@ export default function Analysis({ result, onReset }: AnalysisProps) {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('PDF download error:', error);
-      alert(`Failed to generate PDF report: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to generate PDF report:\n\n${errorMsg}`);
     } finally {
       setIsGeneratingReport(false);
     }
